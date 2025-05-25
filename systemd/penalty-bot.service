@@ -1,0 +1,27 @@
+[Unit]
+Description=Penalty Calculator Telegram Bot
+After=network.target
+Wants=network.target
+
+[Service]
+Type=simple
+User=penalty-bot
+Group=penalty-bot
+WorkingDirectory=/opt/penalty-bot
+Environment=PATH=/opt/penalty-bot/venv/bin
+ExecStart=/opt/penalty-bot/venv/bin/python /opt/penalty-bot/bot.py
+Restart=always
+RestartSec=10
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=penalty-bot
+
+# Безопасность
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=strict
+ProtectHome=yes
+ReadWritePaths=/opt/penalty-bot/data /opt/penalty-bot/logs
+
+[Install]
+WantedBy=multi-user.target 
