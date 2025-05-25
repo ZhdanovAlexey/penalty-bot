@@ -35,7 +35,7 @@
 
 ```bash
 # 1. Клонирование проекта
-git clone <repository-url> penalty-bot
+git clone https://github.com/ZhdanovAlexey/penalty-bot.git penalty-bot
 cd penalty-bot
 
 # 2. Настройка конфигурации

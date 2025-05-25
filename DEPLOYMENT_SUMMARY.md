@@ -96,7 +96,7 @@ sudo apt update && sudo apt upgrade -y
 sudo apt install -y git
 
 # 2. Клонирование и настройка
-git clone <your-repo-url> penalty-bot
+git clone https://github.com/ZhdanovAlexey/penalty-bot.git penalty-bot
 cd penalty-bot
 cp env.example .env
 nano .env  # Заполнить BOT_TOKEN и SPREADSHEET_ID

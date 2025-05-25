@@ -32,7 +32,7 @@ sudo apt install -y git curl wget nano htop
 #### 2. Клонирование проекта
 ```bash
 # Клонируем репозиторий
-git clone <your-repository-url> penalty-bot-deploy
+git clone https://github.com/ZhdanovAlexey/penalty-bot.git penalty-bot-deploy
 cd penalty-bot-deploy
 ```
 
