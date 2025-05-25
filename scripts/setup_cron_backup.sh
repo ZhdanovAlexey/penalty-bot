@@ -28,13 +28,40 @@ info() {
     echo -e "${BLUE}[$(date +'%Y-%m-%d %H:%M:%S')] INFO: $1${NC}"
 }
 
+# Функция для автоматического определения расположения приложения
+detect_app_dir() {
+    local possible_dirs=(
+        "/opt/penalty-bot"
+        "/home/ubuntu/penalty-bot"
+        "$(pwd)"
+        "$(dirname "$(pwd)")"
+    )
+    
+    for dir in "${possible_dirs[@]}"; do
+        if [ -d "$dir" ] && [ -f "$dir/bot.py" ]; then
+            echo "$dir"
+            return 0
+        fi
+    done
+    
+    return 1
+}
+
 # Конфигурация
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+APP_DIR=$(detect_app_dir)
+if [ -z "$APP_DIR" ]; then
+    error "Не удалось найти приложение penalty-bot"
+    error "Проверьте, что вы запускаете скрипт из правильной директории"
+    exit 1
+fi
+
+SCRIPT_DIR="$APP_DIR/scripts"
 BACKUP_SCRIPT="$SCRIPT_DIR/backup.sh"
 CRON_USER="root"
 
 echo -e "${BLUE}⏰ Настройка автоматических бэкапов${NC}"
 echo ""
+log "Обнаружено приложение в: $APP_DIR"
 
 # Проверяем права доступа
 if [[ $EUID -ne 0 ]]; then
@@ -95,11 +122,11 @@ echo ""
 log "🎉 Автоматические бэкапы настроены!"
 
 # Создаем скрипт для ручного управления бэкапами
-cat > /usr/local/bin/penalty-backup << 'EOF'
+cat > /usr/local/bin/penalty-backup << EOF
 #!/bin/bash
 # Удобная команда для управления бэкапами
-SCRIPT_DIR="/opt/penalty-bot/scripts"
-exec "$SCRIPT_DIR/backup.sh" "$@"
+SCRIPT_DIR="$SCRIPT_DIR"
+exec "\$SCRIPT_DIR/backup.sh" "\$@"
 EOF
 
 chmod +x /usr/local/bin/penalty-backup

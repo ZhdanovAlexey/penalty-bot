@@ -28,10 +28,33 @@ info() {
     echo -e "${BLUE}[$(date +'%Y-%m-%d %H:%M:%S')] INFO: $1${NC}"
 }
 
+# Функция для автоматического определения расположения приложения
+detect_app_dir() {
+    local possible_dirs=(
+        "/opt/penalty-bot"
+        "/home/ubuntu/penalty-bot"
+        "$(pwd)"
+        "$(dirname "$(pwd)")"
+    )
+    
+    for dir in "${possible_dirs[@]}"; do
+        if [ -d "$dir" ] && [ -f "$dir/bot.py" ]; then
+            echo "$dir"
+            return 0
+        fi
+    done
+    
+    # Если не найдено, возвращаем стандартный путь
+    echo "/opt/penalty-bot"
+    return 0
+}
+
 # Конфигурация
-APP_DIR="/opt/penalty-bot"
+APP_DIR=$(detect_app_dir)
 BACKUP_BASE_DIR="/var/backups/penalty-bot"
 BACKUP_FILE="$1"
+
+log "Целевая директория приложения: $APP_DIR"
 
 # Функция для отображения доступных бэкапов
 show_available_backups() {
@@ -110,9 +133,11 @@ create_pre_restore_backup() {
     if [ -d "$APP_DIR" ]; then
         tar -czf "$backup_file" \
             --exclude="$APP_DIR/venv" \
+            --exclude="$APP_DIR/.venv" \
             --exclude="$APP_DIR/logs/*.log" \
             --exclude="$APP_DIR/__pycache__" \
             --exclude="$APP_DIR/.git" \
+            --exclude="$APP_DIR/node_modules" \
             -C "$(dirname "$APP_DIR")" \
             "$(basename "$APP_DIR")" 2>/dev/null || {
             warn "Не удалось создать резервную копию"
@@ -122,7 +147,7 @@ create_pre_restore_backup() {
         local size=$(du -h "$backup_file" | cut -f1)
         log "✅ Резервная копия создана: $(basename "$backup_file") ($size)"
     else
-        warn "Приложение не найдено, резервная копия не создана"
+        warn "Приложение не найдено в $APP_DIR, резервная копия не создана"
     fi
 }
 
@@ -130,31 +155,55 @@ create_pre_restore_backup() {
 stop_bot() {
     log "Останавливаем бота..."
     
+    # Проверяем systemd сервис
     if systemctl is-active --quiet penalty-bot 2>/dev/null; then
         systemctl stop penalty-bot
-        log "✅ Бот остановлен"
-    else
-        warn "Сервис penalty-bot не запущен или не найден"
+        log "✅ Systemd сервис остановлен"
+        return 0
     fi
+    
+    # Проверяем Docker контейнеры
+    if command -v docker >/dev/null 2>&1; then
+        local containers=$(docker ps --filter "name=penalty" --format "{{.Names}}" 2>/dev/null)
+        if [ -n "$containers" ]; then
+            echo "$containers" | while read -r container; do
+                docker stop "$container" 2>/dev/null && log "✅ Docker контейнер $container остановлен"
+            done
+            return 0
+        fi
+    fi
+    
+    warn "Не найдено запущенных сервисов penalty-bot"
 }
 
 # Функция для запуска бота
 start_bot() {
     log "Запускаем бота..."
     
+    # Проверяем systemd сервис
     if systemctl is-enabled --quiet penalty-bot 2>/dev/null; then
         systemctl start penalty-bot
         sleep 3
         
         if systemctl is-active --quiet penalty-bot; then
-            log "✅ Бот запущен успешно"
+            log "✅ Systemd сервис запущен успешно"
+            return 0
         else
-            error "Не удалось запустить бота"
-            return 1
+            error "Не удалось запустить systemd сервис"
         fi
-    else
-        warn "Сервис penalty-bot не настроен"
     fi
+    
+    # Проверяем Docker Compose
+    if [ -f "$APP_DIR/docker-compose.yml" ]; then
+        cd "$APP_DIR"
+        if command -v docker-compose >/dev/null 2>&1; then
+            docker-compose up -d 2>/dev/null && log "✅ Docker Compose запущен успешно" && return 0
+        elif command -v docker >/dev/null 2>&1 && docker compose version >/dev/null 2>&1; then
+            docker compose up -d 2>/dev/null && log "✅ Docker Compose запущен успешно" && return 0
+        fi
+    fi
+    
+    warn "Не удалось автоматически запустить бота. Запустите вручную."
 }
 
 # Функция для восстановления данных
@@ -173,8 +222,10 @@ restore_data() {
     }
     
     # Устанавливаем правильные права доступа
-    chown -R root:root "$APP_DIR/data"
-    chmod -R 755 "$APP_DIR/data"
+    if [ -d "$APP_DIR/data" ]; then
+        chown -R $(whoami):$(whoami) "$APP_DIR/data" 2>/dev/null || true
+        chmod -R 755 "$APP_DIR/data"
+    fi
     
     log "✅ Данные восстановлены"
 }
@@ -190,6 +241,7 @@ restore_full() {
         # Сохраняем важные директории
         local temp_dir=$(mktemp -d)
         [ -d "$APP_DIR/venv" ] && mv "$APP_DIR/venv" "$temp_dir/" 2>/dev/null || true
+        [ -d "$APP_DIR/.venv" ] && mv "$APP_DIR/.venv" "$temp_dir/" 2>/dev/null || true
         [ -d "$APP_DIR/logs" ] && mv "$APP_DIR/logs" "$temp_dir/" 2>/dev/null || true
         
         # Удаляем старую директорию
@@ -203,6 +255,7 @@ restore_full() {
         
         # Восстанавливаем сохраненные директории
         [ -d "$temp_dir/venv" ] && mv "$temp_dir/venv" "$APP_DIR/" 2>/dev/null || true
+        [ -d "$temp_dir/.venv" ] && mv "$temp_dir/.venv" "$APP_DIR/" 2>/dev/null || true
         [ -d "$temp_dir/logs" ] && mv "$temp_dir/logs" "$APP_DIR/" 2>/dev/null || true
         
         # Очищаем временную директорию
@@ -216,7 +269,7 @@ restore_full() {
     fi
     
     # Устанавливаем правильные права доступа
-    chown -R root:root "$APP_DIR"
+    chown -R $(whoami):$(whoami) "$APP_DIR" 2>/dev/null || true
     chmod +x "$APP_DIR"/*.py 2>/dev/null || true
     chmod +x "$APP_DIR/scripts"/*.sh 2>/dev/null || true
     
@@ -239,9 +292,14 @@ restore_config() {
         return 1
     }
     
+    # Создаем директорию приложения если не существует
+    mkdir -p "$APP_DIR/data"
+    
     # Копируем файлы конфигурации
     [ -f "$temp_dir/.env" ] && cp "$temp_dir/.env" "$APP_DIR/" && log "✅ Восстановлен .env"
     [ -f "$temp_dir/service_account.json" ] && cp "$temp_dir/service_account.json" "$APP_DIR/data/" && log "✅ Восстановлен service_account.json"
+    [ -f "$temp_dir/docker-compose.yml" ] && cp "$temp_dir/docker-compose.yml" "$APP_DIR/" && log "✅ Восстановлен docker-compose.yml"
+    [ -f "$temp_dir/Dockerfile" ] && cp "$temp_dir/Dockerfile" "$APP_DIR/" && log "✅ Восстановлен Dockerfile"
     
     # Устанавливаем правильные права доступа
     [ -f "$APP_DIR/.env" ] && chmod 600 "$APP_DIR/.env"
@@ -264,6 +322,7 @@ confirm_restore() {
     echo "Файл бэкапа: $(basename "$backup_file")"
     echo "Тип бэкапа: $backup_type"
     echo "Размер: $(du -h "$backup_file" | cut -f1)"
+    echo "Целевая директория: $APP_DIR"
     echo ""
     
     case "$backup_type" in
@@ -354,9 +413,15 @@ main() {
     
     # Показываем статус
     if systemctl is-active --quiet penalty-bot 2>/dev/null; then
-        log "✅ Бот работает нормально"
+        log "✅ Systemd сервис работает нормально"
+    elif command -v docker >/dev/null 2>&1 && docker ps --filter "name=penalty" --format "{{.Names}}" | grep -q penalty; then
+        log "✅ Docker контейнер работает нормально"
     else
-        warn "⚠️  Проверьте статус бота: systemctl status penalty-bot"
+        warn "⚠️  Проверьте статус бота вручную"
+        info "Команды для проверки:"
+        echo "  systemctl status penalty-bot"
+        echo "  docker ps"
+        echo "  docker-compose ps"
     fi
 }
 

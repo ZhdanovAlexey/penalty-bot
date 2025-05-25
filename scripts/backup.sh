@@ -28,11 +28,39 @@ info() {
     echo -e "${BLUE}[$(date +'%Y-%m-%d %H:%M:%S')] INFO: $1${NC}"
 }
 
+# Функция для автоматического определения расположения приложения
+detect_app_dir() {
+    local possible_dirs=(
+        "/opt/penalty-bot"
+        "/home/ubuntu/penalty-bot"
+        "$(pwd)"
+        "$(dirname "$(pwd)")"
+    )
+    
+    for dir in "${possible_dirs[@]}"; do
+        if [ -d "$dir" ] && [ -f "$dir/bot.py" ]; then
+            echo "$dir"
+            return 0
+        fi
+    done
+    
+    return 1
+}
+
 # Конфигурация
-APP_DIR="/opt/penalty-bot"
+APP_DIR=$(detect_app_dir)
+if [ -z "$APP_DIR" ]; then
+    error "Не удалось найти приложение penalty-bot"
+    error "Проверьте, что вы запускаете скрипт из правильной директории"
+    error "Или что приложение находится в /opt/penalty-bot или /home/ubuntu/penalty-bot"
+    exit 1
+fi
+
 BACKUP_BASE_DIR="/var/backups/penalty-bot"
 DATE_STAMP=$(date +%Y%m%d-%H%M%S)
 BACKUP_TYPE="${1:-data}"  # По умолчанию только данные
+
+log "Обнаружено приложение в: $APP_DIR"
 
 # Функция для создания директории бэкапов
 create_backup_dir() {
@@ -48,6 +76,12 @@ check_app_exists() {
     if [ ! -d "$APP_DIR" ]; then
         error "Приложение не найдено в $APP_DIR"
         error "Возможно, бот еще не развернут или путь неверный"
+        exit 1
+    fi
+    
+    if [ ! -f "$APP_DIR/bot.py" ]; then
+        error "Файл bot.py не найден в $APP_DIR"
+        error "Убедитесь, что это правильная директория приложения"
         exit 1
     fi
 }
@@ -76,8 +110,8 @@ backup_data() {
     log "Создаем бэкап данных..."
     
     if [ ! -d "$APP_DIR/data" ]; then
-        warn "Директория данных $APP_DIR/data не найдена"
-        return 1
+        warn "Директория данных $APP_DIR/data не найдена, создаем пустую"
+        mkdir -p "$APP_DIR/data"
     fi
     
     # Создаем архив данных
@@ -104,9 +138,11 @@ backup_full() {
     # Создаем полный архив (исключаем временные файлы и venv)
     tar -czf "$backup_file" \
         --exclude="$APP_DIR/venv" \
+        --exclude="$APP_DIR/.venv" \
         --exclude="$APP_DIR/logs/*.log" \
         --exclude="$APP_DIR/__pycache__" \
         --exclude="$APP_DIR/.git" \
+        --exclude="$APP_DIR/node_modules" \
         -C "$(dirname "$APP_DIR")" \
         "$(basename "$APP_DIR")" 2>/dev/null || {
         error "Ошибка создания полного архива"
@@ -134,6 +170,8 @@ backup_config() {
     # Копируем важные конфигурационные файлы
     [ -f "$APP_DIR/.env" ] && cp "$APP_DIR/.env" "$temp_dir/"
     [ -f "$APP_DIR/data/service_account.json" ] && cp "$APP_DIR/data/service_account.json" "$temp_dir/"
+    [ -f "$APP_DIR/docker-compose.yml" ] && cp "$APP_DIR/docker-compose.yml" "$temp_dir/"
+    [ -f "$APP_DIR/Dockerfile" ] && cp "$APP_DIR/Dockerfile" "$temp_dir/"
     
     if [ "$(ls -A "$temp_dir")" ]; then
         tar -czf "$backup_file" -C "$temp_dir" . 2>/dev/null
@@ -158,6 +196,7 @@ show_backup_stats() {
         local total_size=$(du -sh "$BACKUP_BASE_DIR" 2>/dev/null | cut -f1)
         local backup_count=$(find "$BACKUP_BASE_DIR" -name "*.tar.gz" -type f | wc -l)
         
+        echo "📁 Директория приложения: $APP_DIR"
         echo "📁 Директория бэкапов: $BACKUP_BASE_DIR"
         echo "📦 Всего бэкапов: $backup_count"
         echo "💾 Общий размер: $total_size"
@@ -165,7 +204,7 @@ show_backup_stats() {
         
         if [ $backup_count -gt 0 ]; then
             echo "📋 Последние бэкапы:"
-            find "$BACKUP_BASE_DIR" -name "*.tar.gz" -type f -printf "%T@ %p\n" | \
+            find "$BACKUP_BASE_DIR" -name "*.tar.gz" -type f -printf "%T@ %p\n" 2>/dev/null | \
             sort -nr | \
             head -5 | \
             while read -r timestamp filepath; do
