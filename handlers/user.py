@@ -48,6 +48,13 @@ class PenaltyForm(StatesGroup):
 # Initialize router
 router = Router()
 
+ADMIN_GROUP_ID = -1002264639600
+
+async def notify_admins(bot: Bot, text: str):
+    try:
+        await bot.send_message(ADMIN_GROUP_ID, text)
+    except Exception as e:
+        print(f"Ошибка отправки в группу: {e}")
 
 # Function to check channel subscription
 async def is_subscribed(bot: Bot, user_id: int) -> bool:
@@ -120,7 +127,7 @@ async def cmd_admin(message: Message, state: FSMContext):
 
 # Admin command to add a user as subscribed
 @router.message(Command("adduser"))
-async def cmd_add_user(message: Message, state: FSMContext):
+async def cmd_add_user(message: Message, state: FSMContext, bot: Bot):
     # Сбрасываем любое предыдущее состояние
     await state.clear()
     
@@ -150,7 +157,7 @@ async def cmd_cancel(message: Message, state: FSMContext):
 
 # Handler for user ID input
 @router.message(AdminForm.add_user_id)
-async def process_add_user_id(message: Message, state: FSMContext):
+async def process_add_user_id(message: Message, state: FSMContext, bot: Bot):
     # Проверяем, не является ли это командой
     if message.text.startswith('/'):
         await message.answer("❌ Ожидается ID пользователя, а не команда. Для отмены используйте /cancel")
@@ -168,6 +175,10 @@ async def process_add_user_id(message: Message, state: FSMContext):
     
     if success:
         await message.answer(f"✅ Пользователь с ID {user_id} успешно добавлен как подписанный.")
+        await notify_admins(
+            bot,
+            f"👤 Добавлен новый пользователь: ID {user_id} (добавлено вручную админом {message.from_user.id})"
+        )
     else:
         await message.answer(f"❌ Ошибка при добавлении пользователя с ID {user_id}.")
     
@@ -599,7 +610,7 @@ async def process_participant_type(callback: CallbackQuery, state: FSMContext):
 
 # Unique object callback handler
 @router.callback_query(PenaltyForm.is_unique, F.data.startswith("unique:"))
-async def process_unique_object(callback: CallbackQuery, state: FSMContext):
+async def process_unique_object(callback: CallbackQuery, state: FSMContext, bot: Bot):
     # Extract unique object status from callback data
     is_unique = callback.data.split(":")[1] == "yes"
     
@@ -647,6 +658,19 @@ async def process_unique_object(callback: CallbackQuery, state: FSMContext):
         calculation_data = {**user_data, **result}
         db.save_calculation(callback.from_user.id, calculation_data)
         
+        # Уведомление админам о новом расчете
+        await notify_admins(
+            bot,
+            f"🆕 Новый расчет неустойки:\n"
+            f"Пользователь: {callback.from_user.full_name} (ID: {callback.from_user.id})\n"
+            f"Сумма: {user_data['contract_amount']:,.2f} руб.\n"
+            f"Дата передачи: {user_data['deadline_date_str']}\n"
+            f"Дата расчета: {user_data['calculation_date_str']}\n"
+            f"Тип: {'ФЛ' if user_data['is_individual'] else 'ЮЛ'}, "
+            f"Уникальный: {'Да' if user_data['is_unique'] else 'Нет'}\n"
+            f"Неустойка: {result['penalty_amount']:,.2f} руб."
+        )
+        
         # Создаем клавиатуру для действий после расчета
         builder = InlineKeyboardBuilder()
         builder.button(text="🚀 Новый расчет", callback_data="new_calculation")
@@ -674,8 +698,11 @@ async def process_unique_object(callback: CallbackQuery, state: FSMContext):
             f"❌ Произошла ошибка при расчете неустойки: {str(e)}\n"
             f"Пожалуйста, попробуйте позже или обратитесь к администратору."
         )
-        
-        # Clear state
+        await notify_admins(
+            bot,
+            f"❗️ Ошибка в работе бота (расчет неустойки):\n{str(e)}\n"
+            f"Пользователь: {callback.from_user.full_name} (ID: {callback.from_user.id})"
+        )
         await state.clear()
 
 
