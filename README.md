@@ -206,14 +206,15 @@ GOOGLE_CREDENTIALS_FILE=data/service_account.json
 ```
 penalty-bot/
 ├── bot.py                 # Основной файл бота
-├── database.py           # Работа с базой данных
-├── calculations.py       # Логика расчетов
 ├── config.py            # Конфигурация
 ├── scripts/             # Скрипты развертывания и управления
 │   ├── deploy.sh        # Автоматическое развертывание
 │   ├── backup.sh        # Система бэкапов
 │   ├── restore.sh       # Восстановление из бэкапов
 │   └── update.sh        # Обновление бота
+├── services/            # Логика работы
+│   ├── database.py      # Работа с базой данных
+│   └── calculator.py    # Расчеты
 ├── systemd/             # Конфигурация systemd
 ├── data/                # База данных и файлы
 └── logs/                # Логи приложения
